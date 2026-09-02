@@ -22,11 +22,16 @@ const scoresCache = new Map(); // full -> bundle+scores,供对比页复用
 // ---------------- 路由 ----------------
 const routes = [
   { re: /^#\/$/, fn: renderHome },
-  { re: /^#\/compare\/(.+?)\.\.\.(.*)$/, fn: (m) => renderCompare(decodeURIComponent(m[1]), decodeURIComponent(m[2])) },
+  { re: /^#\/compare\/(.+)$/, fn: (m) => renderCompare(parseCompareSpec(m[1])) },
   { re: /^#\/compare\/?$/, fn: () => renderCompare() },
   { re: /^#\/repo\/([^/]+)\/(.+)$/, fn: (m) => renderRepo(`${m[1]}/${m[2]}`) },
   { re: /^#\/about\/?$/, fn: renderAbout },
 ];
+
+// 深链规格:"a...b...c" → ['a','b','c'](最多 4 个)
+function parseCompareSpec(spec) {
+  return (spec || '').split('...').map(s => decodeURIComponent(s).trim()).filter(Boolean).slice(0, 4);
+}
 
 function navigate() {
   const h = location.hash || '#/';
@@ -338,41 +343,74 @@ function drawRing(canvas, total, archived = false) {
 }
 
 // ---------------- 对比页 ----------------
-// 深链格式:#/compare/<owner/repo>...<owner/repo> ,可直接分享
-async function renderCompare(preA = '', preB = '') {
+// 深链格式:#/compare/<owner/repo>...<owner/repo>...(2–4 个),可直接分享
+async function renderCompare(pres = []) {
+  const filled = pres.filter(s => /^[\w.-]+\/[\w.-]+$/.test(s)).slice(0, 4);
   page(`
-    <h2 class="section-title">⚔️ 双仓库对比 <small>输入两个 owner/repo,雷达叠加 + 指标对决;对比结果可直接分享链接</small></h2>
+    <h2 class="section-title">⚔️ 多仓库对比 <small>2–4 个 owner/repo,雷达叠加 + 指标对决;对比链接可直接分享</small></h2>
     <div class="card compare-inputs">
-      <input id="cmp-a" placeholder="仓库 A,如 vuejs/core" value="${esc(preA)}" spellcheck="false">
-      <span class="vs">VS</span>
-      <input id="cmp-b" placeholder="仓库 B,如 solidjs/solid" value="${esc(preB)}" spellcheck="false">
-      <button class="btn btn-primary" id="cmp-go">开始对比</button>
+      <div id="ci-rows"></div>
+      <div class="ci-actions">
+        <button class="btn" id="ci-add">＋ 添加仓库</button>
+        <button class="btn btn-primary" id="cmp-go">开始对比</button>
+      </div>
     </div>
-    <div id="cmp-body">${preA && preB ? '<div class="spinner"></div><p class="hint">正在拉取两个仓库的数据…</p>' : preA ? '<p class="hint">已带入仓库 A,填写仓库 B 后点击「开始对比」。</p>' : '<p class="hint">提示:对比完成后链接可直接分享;在洞察页点「加入对比」可自动带入 A。</p>'}</div>`);
+    <div id="cmp-body">${filled.length >= 2 ? '<div class="spinner"></div><p class="hint">正在拉取仓库数据…</p>' : '<p class="hint">填写 2–4 个仓库后点击「开始对比」;也可以在任意洞察页点「加入对比」带入。</p>'}</div>`);
 
-  $('#cmp-go').onclick = runCompare;
-  const go = e => { if (e.key === 'Enter') runCompare(); };
-  $('#cmp-a').addEventListener('keydown', go);
-  $('#cmp-b').addEventListener('keydown', go);
+  const rows = $('#ci-rows');
+  const addRow = (value = '') => {
+    if (rows.children.length >= 4) return;
+    const div = document.createElement('div');
+    div.className = 'ci-row';
+    div.innerHTML = `<i class="ci-dot"></i>
+      <input placeholder="owner/repo,如 vuejs/core" spellcheck="false">
+      <button class="ci-rm" title="移除">✕</button>`;
+    div.querySelector('input').value = value;
+    rows.appendChild(div);
+    refreshRows();
+  };
+  const refreshRows = () => {
+    [...rows.children].forEach((r, i) => {
+      r.querySelector('.ci-dot').style.background = PALETTE[i % PALETTE.length];
+      r.querySelector('.ci-rm').style.visibility = rows.children.length > 2 ? 'visible' : 'hidden';
+    });
+    $('#ci-add').disabled = rows.children.length >= 4;
+  };
+  rows.addEventListener('click', e => {
+    if (!e.target.classList.contains('ci-rm')) return;
+    e.target.closest('.ci-row').remove();
+    refreshRows();
+  });
+  $('#ci-add').onclick = () => addRow();
+  filled.forEach(f => addRow(f));
+  while (rows.children.length < 2) addRow();
+  refreshRows();
 
   async function runCompare() {
-    const a = $('#cmp-a').value.trim().replace(/^https?:\/\/github\.com\//i, '');
-    const bb = $('#cmp-b').value.trim().replace(/^https?:\/\/github\.com\//i, '');
-    if (!/^[\w.-]+\/[\w.-]+$/.test(a) || !/^[\w.-]+\/[\w.-]+$/.test(bb)) { toast('请输入 owner/repo 格式的仓库名', true); return; }
-    // 同步深链(不触发重新导航)
-    const deep = `#/compare/${encodeURIComponent(a)}...${encodeURIComponent(bb)}`;
+    const inputs = [...rows.querySelectorAll('input')].map(i => i.value.trim().replace(/^https?:\/\/github\.com\//i, ''));
+    const valid = inputs.filter(v => /^[\w.-]+\/[\w.-]+$/.test(v));
+    if (valid.length < 2) { toast('请至少填写 2 个有效的 owner/repo', true); return; }
+    const repos = [...new Set(valid)];
+    if (repos.length !== valid.length) toast('已忽略重复仓库');
+    const deep = '#/compare/' + repos.map(r => encodeURIComponent(r)).join('...');
     if (location.hash !== deep) history.replaceState(null, '', deep);
-    const body = $('#cmp-body');
-    body.innerHTML = '<div class="spinner"></div><p class="hint">正在拉取两个仓库的数据…</p>';
-    try {
-      const [ra, rb] = await Promise.all([getScored(a), getScored(bb)]);
-      renderCompareResult(body, ra, rb);
-    } catch (e) {
-      body.innerHTML = `<div class="card err-card"><p>${esc(e.message)}</p></div>`;
-    }
-  }
 
-  if (preA && preB) runCompare(); // 深链进入时自动执行
+    const body = $('#cmp-body');
+    body.innerHTML = '<div class="spinner"></div><p class="hint">正在拉取仓库数据…</p>';
+    const settled = await Promise.allSettled(repos.map(getScored));
+    const ok = settled.filter(s => s.status === 'fulfilled').map(s => s.value);
+    if (ok.length < 2) {
+      const reason = settled.find(s => s.status === 'rejected')?.reason?.message || '未知错误';
+      body.innerHTML = `<div class="card err-card"><h2>😵 对比失败</h2><p>${esc(reason)}</p></div>`;
+      return;
+    }
+    if (ok.length < settled.length) toast('部分仓库拉取失败,已跳过', true);
+    renderCompareResult(body, ok);
+  }
+  $('#cmp-go').onclick = runCompare;
+  rows.addEventListener('keydown', e => { if (e.key === 'Enter') runCompare(); });
+
+  if (filled.length >= 2) runCompare(); // 深链进入时自动执行
 }
 
 async function getScored(full) {
@@ -384,61 +422,54 @@ async function getScored(full) {
   return r;
 }
 
-function renderCompareResult(el, ra, rb) {
-  const { b: ba, scores: sa, total: ta } = ra;
-  const { b: bb, scores: sb, total: tb } = rb;
-  const winA = ta > tb, tie = ta === tb;
-  const yearOf = r => (r.commitActivity || []).reduce((s, w) => s + (w.total || 0), 0);
-  const rows = [
-    ['综合健康分', ta, tb, true],
-    ['Stars', ba.repo.stargazers_count, bb.repo.stargazers_count],
-    ['Forks', ba.repo.forks_count, bb.repo.forks_count],
-    ['贡献者', ba.contributorTotal, bb.contributorTotal],
-    ['近一年提交', yearOf(ba), yearOf(bb)],
-    ['最近推送', ba.repo.pushed_at, bb.repo.pushed_at, 'ago'],
-    ['最新 Release', ba.latestRelease?.published_at || null, bb.latestRelease?.published_at || null, 'ago'],
-    ['开放 Issue', ba.repo.open_issues_count, bb.repo.open_issues_count, 'less'],
+function renderCompareResult(el, results) {
+  const maxTotal = Math.max(...results.map(r => r.total));
+  const tie = results.filter(r => r.total === maxTotal).length > 1;
+  const yearOf = b => (b.commitActivity || []).reduce((s, w) => s + (w.total || 0), 0);
+
+  // 指标定义:val 用于比较,disp 用于展示;mode 决定谁"最优"
+  const defs = [
+    { label: '综合健康分', val: r => r.total, disp: r => String(r.total), mode: 'max' },
+    { label: 'Stars', val: r => r.b.repo.stargazers_count, disp: r => fmt(r.b.repo.stargazers_count), mode: 'max' },
+    { label: 'Forks', val: r => r.b.repo.forks_count, disp: r => fmt(r.b.repo.forks_count), mode: 'max' },
+    { label: '贡献者', val: r => r.b.contributorTotal, disp: r => fmt(r.b.contributorTotal), mode: 'max' },
+    { label: '近一年提交', val: r => yearOf(r.b), disp: r => fmt(yearOf(r.b)), mode: 'max' },
+    { label: '最近推送', val: r => new Date(r.b.repo.pushed_at).getTime(), disp: r => ago(r.b.repo.pushed_at), mode: 'max' },
+    { label: '最新 Release', val: r => r.b.latestRelease ? +new Date(r.b.latestRelease.published_at) : -Infinity, disp: r => r.b.latestRelease ? ago(r.b.latestRelease.published_at) : '—', mode: 'max' },
+    { label: '开放 Issue', val: r => r.b.repo.open_issues_count, disp: r => fmt(r.b.repo.open_issues_count), mode: 'min' },
   ];
+
   el.innerHTML = `
-    <div class="cmp-hero">
-      <div class="cmp-side ${winA ? 'win' : ''}">
-        <img src="${ba.repo.owner.avatar_url}" alt=""><b>${esc(ba.repo.full_name)}</b>
-        <em class="cmp-total" style="background:${toneOf(ta)}">${ta}</em>
-        ${winA ? '<span class="win-tag">🏆 胜出</span>' : tie ? '<span class="win-tag tie">平手</span>' : ''}
-      </div>
+    <div class="cmp-wrap">
       <canvas id="cmp-radar"></canvas>
-      <div class="cmp-side ${!winA ? 'win' : ''}">
-        <img src="${bb.repo.owner.avatar_url}" alt=""><b>${esc(bb.repo.full_name)}</b>
-        <em class="cmp-total" style="background:${toneOf(tb)}">${tb}</em>
-        ${!winA ? '<span class="win-tag">🏆 胜出</span>' : tie ? '<span class="win-tag tie">平手</span>' : ''}
+      <div class="cmp-legend">${results.map((r, i) => `<span><i style="background:${PALETTE[i % PALETTE.length]}"></i>${esc(r.b.repo.full_name)}</span>`).join('')}</div>
+      <div class="cmp-sides">
+        ${results.map((r, i) => `
+          <div class="cmp-side ${r.total === maxTotal ? 'win' : ''}">
+            <img src="${r.b.repo.owner.avatar_url}" alt=""><b>${esc(r.b.repo.full_name)}</b>
+            <em class="cmp-total" style="background:${toneOf(r.total)}">${r.total}</em>
+            ${r.total === maxTotal ? `<span class="win-tag">${tie ? '🤝 并列第一' : '🏆 胜出'}</span>` : ''}
+          </div>`).join('')}
       </div>
     </div>
     <div class="card"><table class="cmp-table">
-      <tr><th>指标</th><th>${esc(ba.repo.full_name)}</th><th>${esc(bb.repo.full_name)}</th></tr>
-      ${rows.map(([label, va, vb, mode]) => {
-        let cellA = mode === 'ago' ? ago(va) : fmt(va), cellB = mode === 'ago' ? ago(vb) : fmt(vb);
-        let aBetter = mode === 'less' ? (va ?? Infinity) < (vb ?? Infinity) : (va ?? -1) > (vb ?? -1);
-        if (mode !== true && (va == null || vb == null)) aBetter = null;
-        if (mode === true) aBetter = ta > tb ? true : ta < tb ? false : null;
-        return `<tr><td>${label}</td><td class="${aBetter === true ? 'better' : ''}">${cellA}</td><td class="${aBetter === false ? 'better' : ''}">${cellB}</td></tr>`;
+      <tr><th>指标</th>${results.map(r => `<th>${esc(r.b.repo.full_name)}</th>`).join('')}</tr>
+      ${defs.map(def => {
+        const vals = results.map(def.val);
+        const best = def.mode === 'min' ? Math.min(...vals) : Math.max(...vals);
+        const uniqueBest = vals.filter(v => v === best).length === 1;
+        return `<tr><td>${def.label}</td>${results.map((r, i) => `<td class="${vals[i] === best && uniqueBest ? 'better' : ''}">${def.disp(r)}</td>`).join('')}</tr>`;
       }).join('')}
     </table></div>
     <div class="grid-2">
-      ${DIMENSIONS.map(d => {
-        const va = sa[d.key], vb = sb[d.key];
-        return `<div class="card dim-pair">
-          <div class="dim-head"><b>${d.label}</b><span>${va} <i>vs</i> ${vb}</span></div>
-          <div class="cmp-bars">
-            <div class="cb"><i style="width:${va}%;background:${PALETTE[0]}"></i></div>
-            <div class="cb"><i style="width:${vb}%;background:${PALETTE[1]}"></i></div>
-          </div>
-        </div>`;
-      }).join('')}
+      ${DIMENSIONS.map(d => `
+        <div class="card dim-pair">
+          <div class="dim-head"><b>${d.label}</b><span>${results.map(r => r.scores[d.key]).join(' <i>vs</i> ')}</span></div>
+          <div class="cmp-bars">${results.map((r, i) => `<div class="cb"><i style="width:${r.scores[d.key]}%;background:${PALETTE[i % PALETTE.length]}"></i></div>`).join('')}</div>
+        </div>`).join('')}
     </div>`;
-  drawRadar($('#cmp-radar', el), [
-    { label: ba.repo.full_name, scores: sa, color: PALETTE[0] },
-    { label: bb.repo.full_name, scores: sb, color: PALETTE[1] },
-  ], { width: 360, height: 320 });
+
+  drawRadar($('#cmp-radar', el), results.map((r, i) => ({ label: r.b.repo.full_name, scores: r.scores, color: PALETTE[i % PALETTE.length] })), { width: 380, height: 330 });
 }
 
 // ---------------- 设置(Token) ----------------
