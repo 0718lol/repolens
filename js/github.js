@@ -12,8 +12,17 @@ export function setToken(t) {
   else localStorage.removeItem('repolens_token');
 }
 
-// 剩余配额(由 gh() 每次响应后更新,供 UI 展示)
+// 剩余配额(由每次响应更新,供 UI 展示);onRate 订阅变更
 export const rate = { remaining: null, limit: null, search: null };
+const rateListeners = new Set();
+export function onRate(fn) {
+  rateListeners.add(fn);
+  fn({ ...rate });
+  return () => rateListeners.delete(fn);
+}
+function broadcast() {
+  rateListeners.forEach(f => { try { f({ ...rate }); } catch { /* 忽略订阅方异常 */ } });
+}
 
 // ---------- 简单内存缓存(会话级) ----------
 const cache = new Map();
@@ -83,11 +92,19 @@ export function createLimiter(concurrency = 6) {
 }
 const limit = createLimiter(6);
 
+// 从响应头吸收配额信息并广播
+function absorb(headers, path) {
+  const rem = headers.get('X-RateLimit-Remaining');
+  const lim = headers.get('X-RateLimit-Limit');
+  if (rem != null) rate.remaining = Number(rem);
+  if (lim != null) rate.limit = Number(lim);
+  if (path.startsWith('/search/')) rate.search = Number(rem);
+  broadcast();
+}
+
 const p = async (path) => {
   const { data, headers } = await limit(() => gh(path));
-  const rem = headers.get('X-RateLimit-Remaining');
-  if (rem != null) rate.remaining = Number(rem);
-  if (path.startsWith('/search/')) rate.search = Number(rem);
+  absorb(headers, path);
   return data;
 };
 
@@ -104,8 +121,9 @@ export async function fetchRepo(full) {
 // 52 周逐周提交数(stats 端点:GitHub 侧缓存冷启动时返回 202,需重试)
 export async function fetchCommitActivity(full, retries = 3) {
   for (let i = 0; i <= retries; i++) {
-    const { data, headers } = await ph(`/repos/${full}/stats/commit_activity`);
-    if (headers.get('X-RateLimit-Remaining') != null) rate.remaining = Number(headers.get('X-RateLimit-Remaining'));
+    const path = `/repos/${full}/stats/commit_activity`;
+    const { data, headers } = await ph(path);
+    absorb(headers, path);
     if (Array.isArray(data) && data.length) return data;
     if (i < retries) await sleep(900);
   }

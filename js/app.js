@@ -1,8 +1,9 @@
 // RepoLens · 应用入口:hash 路由 + 视图渲染
-import { fetchRepoBundle, searchRepos, getToken, setToken, RateLimitError, NotFoundError } from './github.js';
+import { fetchRepoBundle, searchRepos, getToken, setToken, onRate, rate, RateLimitError, NotFoundError } from './github.js';
 import { analyze, verdict, DIMENSIONS } from './score.js';
 import { drawRadar, drawHeatmap, drawBars, bundleToDaily, PALETTE } from './charts.js';
 import { exportScorecard } from './card.js';
+import { getHistory, pushHistory, clearHistory, getFavs, isFav, toggleFav } from './store.js';
 
 const view = document.getElementById('view');
 const $ = (sel, el = view) => el.querySelector(sel);
@@ -95,6 +96,32 @@ function renderHome() {
   view.appendChild(document.getElementById('tpl-home').content.cloneNode(true));
   const form = $('.hero-search');
   form.addEventListener('submit', e => { e.preventDefault(); goAnalyze(form.querySelector('input').value); });
+  renderHomeHistory();
+}
+
+// 首页:收藏 + 最近分析
+function renderHomeHistory() {
+  const box = document.getElementById('home-history');
+  if (!box) return;
+  const favs = getFavs();
+  const history = getHistory();
+  if (!favs.length && !history.length) { box.innerHTML = ''; return; }
+
+  const card = (full, total, ts) => {
+    const d = Math.floor((Date.now() - ts) / 864e5);
+    const when = d < 1 ? '今天' : d < 30 ? `${d} 天前` : `${Math.floor(d / 30)} 个月前`;
+    return `<a class="h-card" href="#/repo/${esc(full)}">
+      <b>${esc(full)}</b>
+      ${total != null ? `<em style="background:${toneOf(total)}">${total}</em>` : '<em class="na">—</em>'}
+      <span>${when}</span>
+    </a>`;
+  };
+
+  box.innerHTML = `
+    ${favs.length ? `<div class="h-section"><h2>⭐ 收藏</h2><div class="h-grid">${favs.map(f => card(f, null, Date.now())).join('')}</div></div>` : ''}
+    ${history.length ? `<div class="h-section"><h2>🕘 最近分析 <button class="link-btn" id="btn-clear-history">清空</button></h2><div class="h-grid">${history.map(x => card(x.full, x.total, x.ts)).join('')}</div></div>` : ''}`;
+  const btn = document.getElementById('btn-clear-history');
+  if (btn) btn.onclick = () => { clearHistory(); renderHomeHistory(); toast('已清空历史'); };
 }
 
 function renderAbout() {
@@ -158,6 +185,7 @@ async function renderRepo(full) {
         </div>
         <div class="rh-actions">
           <button class="btn btn-primary" id="btn-card">🃏 导出记分卡</button>
+          <button class="btn" id="btn-fav">${isFav(full) ? '⭐ 已收藏' : '☆ 收藏'}</button>
           <button class="btn" id="btn-compare">⚔️ 加入对比</button>
           <button class="btn" id="btn-share">🔗 复制链接</button>
         </div>
@@ -232,7 +260,13 @@ async function renderRepo(full) {
     drawBars($('#bars'), bundleToDaily(b));
 
     // 动作
+    pushHistory(full, rawTotal); // 记入历史
     $('#btn-card').onclick = () => exportScorecard(b, scores, rawTotal, v);
+    $('#btn-fav').onclick = () => {
+      const on = toggleFav(full);
+      $('#btn-fav').textContent = on ? '⭐ 已收藏' : '☆ 收藏';
+      toast(on ? '已加入收藏' : '已取消收藏');
+    };
     $('#btn-share').onclick = async () => {
       try { await navigator.clipboard.writeText(location.href); toast('链接已复制'); }
       catch { toast('复制失败,请手动复制地址栏', true); }
@@ -427,8 +461,25 @@ function openSettings() {
     </div>`;
   document.body.appendChild(mask);
   mask.addEventListener('click', e => { if (e.target === mask) mask.remove(); });
-  $('#tok-save', mask).onclick = () => { setToken($('#token-input', mask).value); toast('已保存'); mask.remove(); };
-  $('#tok-clear', mask).onclick = () => { setToken(''); $('#token-input', mask).value = ''; toast('已清除'); };
+  $('#tok-save', mask).onclick = () => { setToken($('#token-input', mask).value); updateQuotaChip(); toast('已保存'); mask.remove(); };
+  $('#tok-clear', mask).onclick = () => { setToken(''); updateQuotaChip(); $('#token-input', mask).value = ''; toast('已清除'); };
+}
+
+// 顶栏配额芯片:剩余/上限 三档配色,Token 已配置时加 🔑
+function updateQuotaChip() {
+  const chip = document.querySelector('.quota-chip');
+  if (!chip) return;
+  const { remaining, limit } = rate;
+  chip.classList.toggle('token', !!getToken());
+  chip.title = getToken() ? '已配置 Token · GitHub API 剩余配额' : '未登录 · GitHub API 剩余配额(点 ⚙️ 可设置 Token)';
+  if (remaining == null) {
+    chip.innerHTML = `${getToken() ? '🔑' : ''}⚡ —`;
+    chip.dataset.level = 'unknown';
+    return;
+  }
+  chip.innerHTML = `${getToken() ? '🔑' : ''}⚡ ${remaining}${limit ? '/' + limit : ''}`;
+  const frac = limit ? remaining / limit : remaining / 60;
+  chip.dataset.level = frac > .33 ? 'ok' : frac > .08 ? 'low' : 'crit';
 }
 
 // ---------------- 语言色板 ----------------
@@ -449,5 +500,12 @@ const gear = document.createElement('button');
 gear.className = 'gear-btn'; gear.title = '设置'; gear.textContent = '⚙️';
 document.querySelector('.topbar').appendChild(gear);
 gear.onclick = () => openSettings();
+
+// 配额指示器
+const quotaChip = document.createElement('div');
+quotaChip.className = 'quota-chip';
+document.querySelector('.topbar').appendChild(quotaChip);
+onRate(updateQuotaChip);
+updateQuotaChip();
 
 navigate();

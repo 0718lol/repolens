@@ -16,6 +16,36 @@ const DIM_LABELS = { activity: '活跃', community: '社区', popularity: '热�
 
 const PALETTE = ['#6c5ce7', '#00b894', '#e17055', '#0984e3'];
 
+// ---------- 悬停提示 ----------
+let tipEl = null;
+function tip() {
+  if (!tipEl) {
+    tipEl = document.createElement('div');
+    tipEl.className = 'chart-tip';
+    document.body.appendChild(tipEl);
+  }
+  return tipEl;
+}
+
+// hitTest(x, y):画布 CSS 像素坐标 → 提示文本 | null
+export function attachTip(canvas, hitTest) {
+  canvas.addEventListener('mousemove', e => {
+    const r = canvas.getBoundingClientRect();
+    const text = hitTest(e.clientX - r.left, e.clientY - r.top);
+    const t = tip();
+    if (text) {
+      t.textContent = text;
+      t.classList.add('show');
+      const x = Math.min(e.clientX + 14, window.innerWidth - 150);
+      t.style.left = x + 'px';
+      t.style.top = (e.clientY - 32) + 'px';
+    } else {
+      t.classList.remove('show');
+    }
+  });
+  canvas.addEventListener('mouseleave', () => tip().classList.remove('show'));
+}
+
 // stats/commit_activity 或采样 commits → 按日提交量 Map<'YYYY-MM-DD', n>
 export function bundleToDaily(b) {
   const map = new Map();
@@ -97,6 +127,22 @@ export function drawRadar(canvas, series, opts = {}) {
       ctx.fill();
     });
   });
+
+  // 悬停数据点 → 维度分数
+  attachTip(canvas, (x, y) => {
+    const hits = [];
+    series.forEach((s, si) => {
+      const color = s.color || PALETTE[si % PALETTE.length];
+      DIM_KEYS.forEach((k, i) => {
+        const a = angle(i), r = R * (s.scores[k] / 100);
+        const px = cx + Math.cos(a) * r, py = cy + Math.sin(a) * r;
+        if (Math.hypot(x - px, y - py) <= 12) {
+          hits.push(`${DIM_LABELS[k]} ${s.label.split('/').pop()} ${s.scores[k]}/100`);
+        }
+      });
+    });
+    return hits.length ? hits.join(' · ') : null;
+  });
 }
 
 // 一年提交热力图(GitHub 风格,53 列 × 7 行,行序周一→周日)
@@ -150,6 +196,18 @@ export function drawHeatmap(container, daily) {
   ['一', '三', '五'].forEach((label, i) => {
     ctx.fillText(label, 8, (i * 2 + 1) * (cell + gap) + 10);
   });
+
+  // 悬停格子 → 日期与提交数
+  attachTip(canvas, (x, y) => {
+    const col = Math.floor((x - 30) / (cell + gap));
+    const row = Math.floor(y / (cell + gap));
+    if (col < 0 || col >= weeks || row < 0 || row >= 7) return null;
+    const w = weeks - 1 - col;
+    const date = new Date(lastMonday); date.setUTCDate(lastMonday.getUTCDate() - w * 7 + row);
+    if (date > end) return null;
+    const key = date.toISOString().slice(0, 10);
+    return `${key} · ${map.get(key) || 0} 次提交`;
+  });
 }
 
 // 近 12 个月提交柱状趋势(数据源同热力图)
@@ -186,6 +244,13 @@ export function drawBars(container, daily) {
       ctx.fillStyle = 'rgba(200,205,225,.9)';
       ctx.fillText(m.count >= 10000 ? (m.count / 1000).toFixed(0) + 'k' : String(m.count), x + barW / 2, y - 4);
     }
+  });
+
+  // 悬停柱 → 月份与次数
+  attachTip(canvas, (x, y) => {
+    const i = Math.floor((x - 6) / (barW + 8));
+    if (i < 0 || i >= months.length) return null;
+    return `${months[i].label}月 · ${months[i].count} 次`;
   });
 }
 

@@ -262,6 +262,54 @@ img { max-width: 100%; }
 .about ul { padding-left: 22px; display: flex; flex-direction: column; gap: 6px; }
 .about code { background: rgba(255, 255, 255, .08); padding: 1px 7px; border-radius: 6px; font-size: 13px; }
 
+/* 图表悬停提示 */
+.chart-tip {
+  position: fixed; z-index: 120; pointer-events: none;
+  background: #232742; color: var(--text);
+  border: 1px solid rgba(108, 92, 231, .5); border-radius: 9px;
+  padding: 5px 11px; font-size: 12.5px; white-space: nowrap;
+  opacity: 0; transform: translateY(4px); transition: opacity .12s ease, transform .12s ease;
+  box-shadow: var(--shadow);
+}
+.chart-tip.show { opacity: 1; transform: none; }
+
+/* 配额芯片 */
+.quota-chip {
+  font-size: 12.5px; font-weight: 600; color: var(--text-dim);
+  border: 1px solid var(--card-border); border-radius: 999px;
+  padding: 4px 11px; white-space: nowrap; user-select: none;
+}
+.quota-chip[data-level="ok"] { color: var(--good); border-color: rgba(0, 184, 148, .4); }
+.quota-chip[data-level="low"] { color: var(--warn); border-color: rgba(253, 203, 110, .4); }
+.quota-chip[data-level="crit"] { color: var(--bad); border-color: rgba(225, 112, 85, .5); animation: pulse 1.6s ease infinite; }
+.quota-chip[data-level="unknown"] { color: var(--text-faint); }
+@keyframes pulse { 50% { opacity: .55; } }
+@media (max-width: 720px) { .quota-chip { display: none; } }
+
+/* 首页:收藏与最近分析 */
+.home-history { max-width: 960px; margin: 40px auto 0; text-align: left; }
+.h-section h2 { font-size: 16px; margin-bottom: 12px; display: flex; align-items: center; gap: 10px; }
+.link-btn {
+  background: none; border: none; color: var(--text-faint); font-size: 12px;
+  cursor: pointer; padding: 2px 6px; border-radius: 6px;
+}
+.link-btn:hover { color: var(--bad); background: rgba(225, 112, 85, .12); }
+.h-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.h-card {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--card); border: 1px solid var(--card-border);
+  border-radius: 12px; padding: 10px 14px; color: var(--text); transition: .15s;
+}
+.h-card:hover { text-decoration: none; border-color: rgba(108, 92, 231, .5); transform: translateY(-2px); }
+.h-card b { flex: 1; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.h-card em {
+  font-style: normal; font-weight: 800; font-size: 12.5px; color: #fff;
+  min-width: 30px; height: 30px; border-radius: 50%;
+  display: inline-grid; place-content: center;
+}
+.h-card em.na { background: rgba(120, 130, 160, .3); }
+.h-card span { color: var(--text-faint); font-size: 11.5px; }
+
 /* 错误卡 */
 .err-card { text-align: center; padding: 46px 24px; }
 .err-card h2 { font-size: 20px; margin-bottom: 8px; }
