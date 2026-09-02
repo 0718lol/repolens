@@ -1,9 +1,9 @@
 // RepoLens · 应用入口:hash 路由 + 视图渲染
-import { fetchRepoBundle, searchRepos, getToken, setToken, onRate, rate, RateLimitError, NotFoundError } from './github.js';
-import { analyze, verdict, DIMENSIONS } from './score.js';
+import { fetchRepoBundle, searchRepos, getToken, setToken, onRate, rate, getApiBase, setApiBase, RateLimitError, NotFoundError } from './github.js';
+import { analyze, verdict, DIMENSIONS, hasCustomWeights } from './score.js';
 import { drawRadar, drawHeatmap, drawBars, bundleToDaily, PALETTE } from './charts.js';
 import { exportScorecard } from './card.js';
-import { getHistory, pushHistory, clearHistory, getFavs, isFav, toggleFav } from './store.js';
+import { getHistory, pushHistory, clearHistory, getFavs, isFav, toggleFav, getWeights, setWeights, encodeWeights, decodeWeights } from './store.js';
 
 const view = document.getElementById('view');
 const $ = (sel, el = view) => el.querySelector(sel);
@@ -161,8 +161,9 @@ async function renderRepo(full) {
   try {
     const b = await fetchRepoBundle(full, progress);
     hideLoading();
-    const { scores, evidence, total: rawTotal } = analyze(b);
+    const customW = getWeights();
     const archived = !!b.repo.archived;
+    const { scores, evidence, total: rawTotal } = analyze(b, customW);
     const total = archived ? null : rawTotal; // 归档仓库不给综合分
     scoresCache.set(full, { b, scores, total: rawTotal });
 
@@ -213,12 +214,27 @@ async function renderRepo(full) {
           </div>
         </section>
         <section class="card">
-          <h2>维度明细 <small>每项均给出得分依据</small></h2>
+          <h2>维度明细 <small>每项均给出得分依据</small>
+            <button class="link-btn" id="btn-weights">${hasCustomWeights(customW) ? '⚖️ 自定义权重生效中' : '⚖️ 自定义权重'}</button>
+          </h2>
+          <div id="weights-panel" class="weights-panel hidden">
+            <p class="hint">拖动滑杆调整五维权重(按比例归一化),总分实时重算;权重写入链接,可分享你的口径。</p>
+            ${DIMENSIONS.map(d => `
+              <div class="w-row">
+                <span>${d.label}</span>
+                <input type="range" min="0" max="40" step="1" data-k="${d.key}" value="${customW?.[d.key] ?? Math.round(d.weight * 100)}">
+                <b data-wv="${d.key}">—</b>
+              </div>`).join('')}
+            <div class="w-foot">
+              <span class="hint" id="w-note"></span>
+              <button class="link-btn" id="w-reset">恢复默认</button>
+            </div>
+          </div>
           <div class="dims">
             ${DIMENSIONS.map(d => `
-              <div class="dim" title="${esc(d.desc)}">
+              <div class="dim" data-k="${d.key}" title="${esc(d.desc)}">
                 <div class="dim-head"><span>${d.label}<small>权重 ${(d.weight * 100).toFixed(0)}%</small></span><b>${scores[d.key]}</b></div>
-                <div class="dim-bar"><i style="width:${scores[d.key]}%" data-c="${toneOf(scores[d.key])}"></i></div>
+                <div class="dim-bar"><i style="width:${scores[d.key]}%;background:${toneOf(scores[d.key])}" data-c="${toneOf(scores[d.key])}"></i></div>
                 <div class="dim-evidence">${evidence[d.key].map(esc).join(' · ')}</div>
               </div>`).join('')}
           </div>
@@ -264,9 +280,64 @@ async function renderRepo(full) {
     drawHeatmap($('#heatmap'), bundleToDaily(b));
     drawBars($('#bars'), bundleToDaily(b));
 
+    // ---- 自定义权重:实时重算 ----
+    const updateWeightLabels = () => {
+      const inputs = $$('#weights-panel input[type=range]');
+      const sum = inputs.reduce((s, r) => s + Number(r.value), 0) || 1;
+      inputs.forEach(r => {
+        $(`#weights-panel [data-wv="${r.dataset.k}"]`).textContent = Math.round(Number(r.value) / sum * 100) + '%';
+      });
+    };
+    const applyWeights = () => {
+      const w = getWeights();
+      const re = analyze(b, w);
+      scoresCache.set(full, { b, scores: re.scores, total: re.total });
+      drawRing($('#ring'), archived ? null : re.total, archived);
+      drawRadar($('#radar'), [{ label: repo.full_name, scores: re.scores, color: PALETTE[0] }], { width: 300, height: 280 });
+      $('.ring-num b').textContent = archived ? '—' : re.total;
+      DIMENSIONS.forEach(d => {
+        const row = $(`.dim[data-k="${d.key}"]`);
+        const bar = row.querySelector('.dim-bar i');
+        bar.style.width = re.scores[d.key] + '%';
+        bar.style.background = toneOf(re.scores[d.key]);
+        row.querySelector('.dim-head b').textContent = re.scores[d.key];
+      });
+      const nv = verdict(b, re.scores, re.total);
+      const vb = $('.verdict');
+      vb.className = `verdict verdict-${nv.tone}`;
+      vb.innerHTML = `<div class="v-icon">${{ good: '✅', warn: '⚠️', bad: '⛔', info: '📦' }[nv.tone]}</div><div><b>${nv.title}</b><p>${esc(nv.text)}</p></div>`;
+      $('#btn-weights').textContent = hasCustomWeights(w) ? '⚖️ 自定义权重生效中' : '⚖️ 自定义权重';
+      $('#w-note').textContent = hasCustomWeights(w) ? '当前为自定义口径,记分卡与对比页同样生效' : '默认口径';
+      history.replaceState(null, '', (w ? `?w=${encodeWeights(w)}` : location.pathname) + location.hash);
+    };
+    $('#btn-weights').onclick = () => $('#weights-panel').classList.toggle('hidden');
+    $('#weights-panel').addEventListener('input', e => {
+      if (e.target.type !== 'range') return;
+      const w = {};
+      $$('#weights-panel input[type=range]').forEach(r => { w[r.dataset.k] = Number(r.value); });
+      if (Object.values(w).every(v => v === 0)) return; // 全零权重无意义,忽略
+      setWeights(w);
+      scoresCache.clear(); // 权重变化使对比缓存失效
+      updateWeightLabels();
+      applyWeights();
+    });
+    $('#w-reset').onclick = () => {
+      setWeights(null);
+      scoresCache.clear();
+      $$('#weights-panel input[type=range]').forEach(r => {
+        r.value = Math.round(DIMENSIONS.find(d => d.key === r.dataset.k).weight * 100);
+      });
+      updateWeightLabels();
+      applyWeights();
+    };
+    updateWeightLabels();
+
     // 动作
     pushHistory(full, rawTotal); // 记入历史
-    $('#btn-card').onclick = () => exportScorecard(b, scores, rawTotal, v);
+    $('#btn-card').onclick = () => {
+      const cur = analyze(b, getWeights());
+      exportScorecard(b, cur.scores, cur.total, verdict(b, cur.scores, cur.total), hasCustomWeights(getWeights()));
+    };
     $('#btn-fav').onclick = () => {
       const on = toggleFav(full);
       $('#btn-fav').textContent = on ? '⭐ 已收藏' : '☆ 收藏';
@@ -416,7 +487,7 @@ async function renderCompare(pres = []) {
 async function getScored(full) {
   if (scoresCache.has(full)) return scoresCache.get(full);
   const b = await fetchRepoBundle(full, () => {});
-  const { scores, total } = analyze(b);
+  const { scores, total } = analyze(b, getWeights()); // 对比同样尊重自定义权重
   const r = { b, scores, total };
   scoresCache.set(full, r);
   return r;
@@ -484,7 +555,10 @@ function openSettings() {
       <label class="field"><span>GitHub Personal Access Token(可选)</span>
         <input id="token-input" type="password" placeholder="ghp_… 提升限额到 5000 次/小时" value="${esc(getToken())}">
       </label>
-      <p class="hint">Token 仅保存在你的浏览器 localStorage,请求只发往 GitHub。建议创建只读、无过期时间的 classic token 即可。</p>
+      <label class="field"><span>GitHub API 地址(GHE 用户可改为企业实例)</span>
+        <input id="api-input" type="text" placeholder="https://api.github.com" value="${esc(getApiBase())}" spellcheck="false">
+      </label>
+      <p class="hint">Token 与 API 地址仅保存在你的浏览器 localStorage,请求只发往你配置的实例。</p>
       <div class="row-gap right">
         <button class="btn" id="tok-clear">清除</button>
         <button class="btn btn-primary" id="tok-save">保存</button>
@@ -492,7 +566,13 @@ function openSettings() {
     </div>`;
   document.body.appendChild(mask);
   mask.addEventListener('click', e => { if (e.target === mask) mask.remove(); });
-  $('#tok-save', mask).onclick = () => { setToken($('#token-input', mask).value); updateQuotaChip(); toast('已保存'); mask.remove(); };
+  $('#tok-save', mask).onclick = () => {
+    setToken($('#token-input', mask).value);
+    setApiBase($('#api-input', mask).value);
+    updateQuotaChip();
+    toast('已保存');
+    mask.remove();
+  };
   $('#tok-clear', mask).onclick = () => { setToken(''); updateQuotaChip(); $('#token-input', mask).value = ''; toast('已清除'); };
 }
 
@@ -538,5 +618,12 @@ quotaChip.className = 'quota-chip';
 document.querySelector('.topbar').appendChild(quotaChip);
 onRate(updateQuotaChip);
 updateQuotaChip();
+
+// URL ?w= 中的自定义权重优先于本地持久化(便于分享口径)
+const qw = new URLSearchParams(location.search).get('w');
+if (qw !== null) {
+  const parsed = decodeWeights(qw);
+  setWeights(parsed); // 解析失败(null)即恢复默认
+}
 
 navigate();

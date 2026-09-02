@@ -17,7 +17,7 @@ const TONE = {
   info: ['#74b9ff'],
 };
 
-export function exportScorecard(b, scores, total, v) {
+export function exportScorecard(b, scores, total, v, customW = false) {
   const W = 1000, H = 620, S = 2; // 2x 导出更清晰
   const canvas = document.createElement('canvas');
   canvas.width = W * S; canvas.height = H * S;
@@ -112,6 +112,13 @@ export function exportScorecard(b, scores, total, v) {
   });
 
   // 下载
+  if (customW) {
+    ctx.fillStyle = 'rgba(255,255,255,.45)';
+    ctx.font = '12px -apple-system, "PingFang SC", sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText('⚖️ 自定义权重口径', W - 48, 40);
+    ctx.textAlign = 'left';
+  }
   canvas.toBlob(blob => {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);

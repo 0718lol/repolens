@@ -1,7 +1,20 @@
 // RepoLens · GitHub API 层
-// 直接从浏览器请求 GitHub 公开 REST API,带内存缓存、可选 Token 与并发限流。
+// 直接从浏览器请求 GitHub(或 GHE)REST API,带内存缓存、可选 Token 与并发限流。
 
-const API = 'https://api.github.com';
+const DEFAULT_API = 'https://api.github.com';
+let API = (() => {
+  try { return localStorage.getItem('repolens_api') || DEFAULT_API; }
+  catch { return DEFAULT_API; }
+})();
+
+export function getApiBase() { return API; }
+// 切换 API 地址(如 GHE):持久化并清空会话缓存
+export function setApiBase(base) {
+  base = (base || '').trim().replace(/\/+$/, '');
+  API = base || DEFAULT_API;
+  try { localStorage.setItem('repolens_api', API); } catch { /* 忽略 */ }
+  cache.clear();
+}
 
 export function getToken() {
   return localStorage.getItem('repolens_token') || '';
@@ -151,6 +164,23 @@ export async function fetchIssueCounts(full) {
   return { open: open?.total_count ?? null, closed: closed?.total_count ?? null };
 }
 
+// 仓库详情数据完整性校验:畸形响应在此拦截,而不是让评分层崩出裸异常
+export function validateBundle(b) {
+  if (!b || typeof b !== 'object') throw new Error('仓库数据缺失,GitHub API 返回异常');
+  const r = b.repo;
+  if (!r || typeof r.full_name !== 'string' || !r.owner?.avatar_url || !r.html_url) {
+    throw new Error('仓库元信息不完整,GitHub API 返回异常');
+  }
+  const nums = [r.stargazers_count, r.forks_count, r.open_issues_count];
+  if (nums.some(n => typeof n !== 'number' || !Number.isFinite(n) || n < 0)) {
+    throw new Error('仓库指标数据异常,GitHub API 返回不完整');
+  }
+  if (!Array.isArray(b.releases) || !Array.isArray(b.issues)) {
+    throw new Error('仓库关联数据异常(Release/Issue),请稍后重试');
+  }
+  return true;
+}
+
 // 仓库详情聚合
 export async function fetchRepoBundle(full, onProgress = () => {}) {
   onProgress('仓库元信息…', 5);
@@ -189,6 +219,7 @@ export async function fetchRepoBundle(full, onProgress = () => {}) {
     onProgress('提交采样(降级)…', 88);
     bundle._fallbackCommits = await p(`/repos/${full}/commits?per_page=100&since=${encodeURIComponent(new Date(Date.now() - 365 * 864e5).toISOString())}`).catch(() => []);
   }
+  validateBundle(bundle);
   return bundle;
 }
 

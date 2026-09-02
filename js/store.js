@@ -6,8 +6,7 @@ const MAX_HISTORY = 20;
 
 function read(key, fallback) {
   try {
-    const v = JSON.parse(localStorage.getItem(key));
-    return Array.isArray(v) ? v : fallback;
+    return JSON.parse(localStorage.getItem(key)) ?? fallback;
   } catch {
     return fallback;
   }
@@ -19,7 +18,8 @@ function write(key, v) {
 
 // ---------- 历史 ----------
 export function getHistory() {
-  return read(HKEY, []);
+  const h = read(HKEY, []);
+  return Array.isArray(h) ? h : [];
 }
 
 // 记录一次分析(去重置顶,封顶 20 条);total 可为 null(归档)
@@ -40,7 +40,8 @@ export function clearHistory() {
 
 // ---------- 收藏 ----------
 export function getFavs() {
-  return read(FKEY, []);
+  const f = read(FKEY, []);
+  return Array.isArray(f) ? f : [];
 }
 
 export function isFav(full) {
@@ -55,4 +56,40 @@ export function toggleFav(full) {
   else favs.unshift(full);
   write(FKEY, favs);
   return i < 0;
+}
+
+// ---------- 自定义权重 ----------
+const WKEY = 'repolens_weights';
+
+// 返回原始权重对象(0–40 档)或 null(默认)
+export function getWeights() {
+  const w = read(WKEY, null);
+  return w && typeof w === 'object' && !Array.isArray(w) ? w : null;
+}
+
+export function setWeights(w) {
+  if (w && typeof w === 'object') write(WKEY, w);
+  else localStorage.removeItem(WKEY);
+}
+
+// 权重 ↔ URL 片段("activity:30,community:20,..." ↔ 对象),非法输入返回 null
+export function encodeWeights(w) {
+  if (!w || typeof w !== 'object') return null;
+  const s = Object.entries(w).map(([k, v]) => `${k}:${Number(v) || 0}`).join(',');
+  return encodeURIComponent(s);
+}
+
+export function decodeWeights(str) {
+  if (!str) return null;
+  try {
+    const out = {};
+    for (const pair of decodeURIComponent(str).split(',')) {
+      const [k, v] = pair.split(':');
+      if (!/^[\w]+$/.test(k || '') || !Number.isFinite(Number(v))) return null;
+      out[k] = Math.max(0, Math.min(40, Number(v)));
+    }
+    return Object.keys(out).length ? out : null;
+  } catch {
+    return null;
+  }
 }

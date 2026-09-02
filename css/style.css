@@ -202,6 +202,22 @@ img { max-width: 100%; }
 .dim-evidence { margin-top: 5px; font-size: 12px; color: var(--text-faint); line-height: 1.5; }
 @keyframes grow { from { width: 0 !important; } }
 
+/* 自定义权重面板 */
+.dim-tools { display: inline-block; margin-left: 8px; }
+#btn-weights { font-size: 12px; }
+.weights-panel {
+  margin: 4px 0 14px; padding: 12px 14px;
+  border: 1px dashed rgba(108, 92, 231, .45); border-radius: 12px;
+  background: rgba(108, 92, 231, .07);
+}
+.weights-panel .hint { margin: 0 0 8px; }
+.w-row { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
+.w-row span { width: 34px; font-size: 13px; color: var(--text-dim); }
+.w-row input[type="range"] { flex: 1; accent-color: var(--accent); height: 4px; }
+.w-row b { width: 42px; text-align: right; font-size: 13px; color: var(--accent-2); }
+.w-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
+.w-foot .hint { margin: 0; }
+
 /* 热力图与统计 */
 .heatmap-scroll { overflow-x: auto; padding-bottom: 4px; }
 .stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }

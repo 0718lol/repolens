@@ -1,5 +1,5 @@
 // 评分模型冒烟测试(node test/score.test.mjs)
-import { scoreDimensions, weightedScore, verdict, analyze } from '../js/score.js';
+import { scoreDimensions, weightedScore, verdict, analyze, hasCustomWeights } from '../js/score.js';
 
 const now = Date.now();
 const daysAgo = d => new Date(now - d * 864e5).toISOString();
@@ -86,6 +86,20 @@ const hi = analyze(bundle({ issueCounts: { open: 2000, closed: 100 } })).scores.
 const lo = analyze(bundle({ issueCounts: { open: 100, closed: 2000 } })).scores.response;
 console.log('response  : 开放占多', hi, 'vs 关闭占多', lo);
 check(lo > hi, '响应维度未反映开放占比差异');
+
+// 7. 自定义权重:归一化与边界
+const s1 = scoreDimensions(bundle());
+check(weightedScore(s1, { activity: 40, community: 0, popularity: 0, maintenance: 0, response: 0 }) === s1.activity,
+  '单维满权重应等于该维分数');
+const avg = weightedScore(s1, { activity: 1, community: 1, popularity: 0, maintenance: 0, response: 0 });
+check(avg === Math.round((s1.activity + s1.community) / 2), '两维等权应为其均值: ' + avg);
+check(weightedScore(s1, { activity: 0, community: 0, popularity: 0, maintenance: 0, response: 0 }) === weightedScore(s1), '全零自定义权重应回退默认');
+check(weightedScore(s1, { activity: 'x', community: -5 }) === weightedScore(s1), '非法/负权重应回退默认');
+const aCust = analyze(bundle(), { activity: 40, community: 10, popularity: 10, maintenance: 10, response: 10 });
+check(Number.isFinite(aCust.total), 'analyze 自定义权重崩溃');
+check(hasCustomWeights({ activity: 28, community: 22, popularity: 18, maintenance: 18, response: 14 }) === false, '默认档位不应判为自定义');
+check(hasCustomWeights({ activity: 40, community: 10, popularity: 10, maintenance: 10, response: 10 }) === true, '非默认档位应判为自定义');
+console.log('weights   : 单维=', weightedScore(s1, { activity: 40 }), '两维均值=', avg);
 
 if (failed) throw new Error(`${failed} 项断言失败`);
 console.log('\n全部 6 组用例通过 ✅');

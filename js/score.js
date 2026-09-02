@@ -154,16 +154,28 @@ export function scoreEvidence(b) {
   };
 }
 
-export function weightedScore(scores) {
+export function weightedScore(scores, customWeights = null) {
+  // 自定义权重按比例归一化;非法或全零回退默认口径
   let sum = 0, wsum = 0;
-  for (const d of DIMENSIONS) { sum += scores[d.key] * d.weight; wsum += d.weight; }
+  for (const d of DIMENSIONS) {
+    const w = customWeights
+      ? Math.max(0, Number(customWeights[d.key]) || 0)
+      : d.weight;
+    sum += scores[d.key] * w;
+    wsum += w;
+  }
+  if (!wsum) return customWeights ? weightedScore(scores) : 0;
   return Math.round(sum / wsum);
 }
 
-// 高层封装:一次算出分数 + 依据 + 总分
-export function analyze(b) {
+// 高层封装:一次算出分数 + 依据 + 总分(可带自定义权重)
+export function analyze(b, customWeights = null) {
   const scores = scoreDimensions(b);
-  return { scores, evidence: scoreEvidence(b), total: weightedScore(scores) };
+  return { scores, evidence: scoreEvidence(b), total: weightedScore(scores, customWeights) };
+}
+
+export function hasCustomWeights(customWeights) {
+  return !!customWeights && DIMENSIONS.some(d => Number(customWeights[d.key]) !== Math.round(d.weight * 100));
 }
 
 // 综合结论(供记分卡与详情页"一句话判断"使用)
