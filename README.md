@@ -1,0 +1,76 @@
+# 🔍 RepoLens — GitHub 仓库健康度洞察与对比
+
+**Stars 只说明流行,不说明健康。** RepoLens 为任意 GitHub 仓库计算五维健康分,生成可视化洞察页与可分享的 PNG 记分卡,并支持双仓库雷达叠加对比。
+
+纯前端、零依赖、零构建 —— 一个静态目录,扔上 GitHub Pages 就能用。
+
+## ✨ 核心功能
+
+| 功能 | 说明 |
+|---|---|
+| 🧭 健康分雷达 | 活跃 / 社区 / 热度 / 维护 / 响应 五维加权评分,综合分 0–100 |
+| 📊 全量统计 | 提交数据来自 GitHub 官方 stats 接口(52 周全量),贡献者数经分页推算,Issue 占比取自全库 search 总量,而非 100 条采样 |
+| 🔍 评分可解释 | 每个维度都给出得分依据:最近推送、全年提交、近 90 天动量、全库 Issue 开放占比…… |
+| 🚦 一句话结论 | "非常健康 / 需要留意 / 疑似停止维护" 直接告诉你还能不能用 |
+| 🗓 活跃热力图 | 近 12 个月提交热力图 + 月度趋势柱状图(全量数据驱动) |
+| 🃏 PNG 记分卡 | 一键导出精美记分卡,可贴进 README、周报、社交平台 |
+| ⚔️ 双仓库对比 | 雷达叠加 + 逐项指标对决,胜者高亮;**对比结果生成可分享深链** `#/compare/a...b` |
+| 🔎 智能识别 | 输入 `owner/repo` 直接分析,输入关键词走仓库搜索;支持粘贴 GitHub URL |
+| 🔑 可选 Token | 内置设置面板,Token 只存浏览器 localStorage,限额从 60 次/时提升到 5000 次/时 |
+
+## 🔄 版本
+
+### v2(当前)
+- 提交统计改用 `stats/commit_activity`(52 周全量,含 202 冷缓存重试与采样降级)
+- 贡献者总数通过 `Link` 分页头推算,不再封顶 100
+- 开放/关闭 Issue 占比改用 search API 全库 `total_count`
+- 每个评分维度输出"得分依据"
+- 对比页支持深链分享,「加入对比」自动带入 A 仓库
+- 归档仓库综合分置灰显示"—",不再给出误导性分数
+
+### v1
+- 首版:五维评分、热力图、PNG 记分卡、双仓库对比
+
+## 🚀 运行
+
+```bash
+cd repolens
+python3 -m http.server 8080
+# 打开 http://localhost:8080
+```
+
+> 因为使用 ES Modules,需要通过 HTTP 服务访问,直接双击 index.html 不行。
+> 部署:整个目录推到任意静态托管(GitHub Pages / Vercel / Netlify)即可。
+
+## 🧱 架构
+
+```
+repolens/
+├── index.html        # 壳 + 首页/关于模板
+├── css/style.css     # 设计系统(深色玻璃拟态 + 霓虹渐变)
+└── js/
+    ├── app.js        # hash 路由 + 视图渲染(首页/洞察/对比/关于)
+    ├── github.js     # API 层:fetch 封装、内存缓存、并发限流、错误分类
+    ├── score.js      # 评分模型:五维打分 + 加权总分 + 结论生成(纯函数)
+    ├── charts.js     # Canvas 图表:雷达 / 热力图 / 柱状趋势(零依赖)
+    └── card.js       # PNG 记分卡导出(纯 Canvas 绘制)
+└── test/
+    └── score.test.mjs # 评分模型冒烟测试(node test/score.test.mjs)
+```
+
+分层原则:**数据(github)→ 计算(score)→ 呈现(charts/card/app)** 互相只通过函数调用解耦;评分模型是纯函数,改权重只动 `score.js`。
+
+## 🎯 与 GitHub 自带 Insights 的差异
+
+- GitHub 的 Pulse / Graphs 分散且要多次跳转,RepoLens 一屏给出综合结论;
+- GitHub 没有跨仓库对比,RepoLens 雷达叠加 + 指标表直接对决;
+- GitHub 没有可导出的可视化记分卡,RepoLens 一键 PNG;
+- RepoLens 评分模型完全开源(`js/score.js`),权重透明可调。
+
+## ⚠️ 说明与限制
+
+- 评分为启发式估算:提交/Issue 均为 API 采样(近 100 条),非全量统计;
+- 未登录限额 60 请求/小时,一次完整分析约消耗 8 次请求(有 5 分钟会话缓存);
+- 所有请求由浏览器直连 GitHub API,本项目不经手任何数据。
+
+MIT License

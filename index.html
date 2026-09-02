@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RepoLens — 仓库健康度洞察与对比</title>
+<meta name="description" content="输入任意 GitHub 仓库,即刻获得健康度雷达图、活跃度热力图与可分享记分卡,并支持双仓库对比。">
+<link rel="stylesheet" href="css/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔍</text></svg>">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="#/">
+    <span class="brand-mark">🔍</span>
+    <span class="brand-name">Repo<em>Lens</em></span>
+  </a>
+  <nav class="topnav">
+    <a href="#/" data-nav="home">洞察</a>
+    <a href="#/compare" data-nav="compare">对比</a>
+    <a href="#/about" data-nav="about">关于</a>
+  </nav>
+  <form id="search-form" class="searchbar" autocomplete="off">
+    <input id="search-input" type="text" placeholder="输入仓库,如 facebook/react 或关键词搜索…" spellcheck="false">
+    <button type="submit" title="分析">分析</button>
+  </form>
+</header>
+
+<section class="loading hidden" id="global-loading"><div class="spinner"></div><p id="loading-text">加载中…</p></section>
+
+<main id="view" class="view">
+  <!-- 首页 / 仓库详情 / 对比 / 关于 由路由渲染 -->
+</main>
+
+<footer class="footer">
+  <p>RepoLens · 数据来自 <a href="https://docs.github.com/rest" target="_blank" rel="noopener">GitHub 公开 API</a> · 纯前端,无服务器,可任意静态部署</p>
+</footer>
+
+<template id="tpl-home">
+  <div class="hero">
+    <h1>给每个开源仓库<br>一面<em>照妖镜</em></h1>
+    <p class="sub">Stars 只说明流行,不说明健康。RepoLens 从活跃度、社区、热度、维护、响应五个维度为仓库打分,生成可分享记分卡,并支持双仓库横向对比。</p>
+    <form class="hero-search" autocomplete="off">
+      <input type="text" placeholder="owner/repo,例如 vuejs/core" spellcheck="false">
+      <button type="submit">开始洞察</button>
+    </form>
+    <div class="hero-chips">
+      <span>试试:</span>
+      <button data-eg="vuejs/core">vuejs/core</button>
+      <button data-eg="facebook/react">facebook/react</button>
+      <button data-eg="torvalds/linux">torvalds/linux</button>
+      <button data-eg="microsoft/vscode">microsoft/vscode</button>
+    </div>
+    <div class="hero-features">
+      <div class="feature"><h3>🧭 健康分雷达</h3><p>五维加权评分:活跃、社区、热度、维护、响应,一眼看清仓库真实状态。</p></div>
+      <div class="feature"><h3>🗓 活跃热力图</h3><p>一年提交热力图 + 趋势,比 GitHub Insights 更快定位"是否还在维护"。</p></div>
+      <div class="feature"><h3>🃏 一键记分卡</h3><p>生成精美 PNG 记分卡,贴到 README、周报或社交平台分享。</p></div>
+      <div class="feature"><h3>⚔️ 双库对比</h3><p>选星困难症?两个候选库雷达叠加对比,数据替你做决定。</p></div>
+    </div>
+  </div>
+</template>
+
+<template id="tpl-about">
+  <div class="about card">
+    <h1>关于 RepoLens</h1>
+    <p>RepoLens 是一个零依赖、纯前端的 GitHub 仓库健康度分析工具。所有请求直接从你的浏览器发往 GitHub 公开 API,不经任何服务器,因此:</p>
+    <ul>
+      <li><b>隐私</b>:不收集任何数据,无后端、无埋点。</li>
+      <li><b>可部署</b>:整个项目是静态文件,放到 GitHub Pages / 任意 CDN 即可运行。</li>
+      <li><b>评分模型</b>:五维雷达(活跃 / 社区 / 热度 / 维护 / 响应),权重与算法在 <code>js/score.js</code> 中完全开源可调。</li>
+      <li><b>限制</b>:未登录状态下 GitHub API 每小时 60 次请求;高频使用可在 Settings 中填入 Personal Access Token(仅存于浏览器 localStorage)。</li>
+    </ul>
+    <h2>对比 GitHub 自带 Insights</h2>
+    <table class="cmp-table">
+      <tr><th>能力</th><th>GitHub Insights</th><th>RepoLens</th></tr>
+      <tr><td>健康度综合评分</td><td>✗ 分散在各页面</td><td>✓ 五维雷达一屏呈现</td></tr>
+      <tr><td>跨仓库对比</td><td>✗</td><td>✓ 雷达叠加对比</td></tr>
+      <tr><td>可分享记分卡</td><td>✗</td><td>✓ 一键导出 PNG</td></tr>
+      <tr><td>"还能不能用"结论</td><td>需自行判断</td><td>✓ 直接给出维护状态结论</td></tr>
+    </table>
+    <h2>评分维度</h2>
+    <ul>
+      <li><b>活跃 Activity</b>:最近推送时间、一年提交量与趋势。</li>
+      <li><b>社区 Community</b>:贡献者数量、讨论参与度。</li>
+      <li><b>热度 Popularity</b>:Stars / Forks / Watchers(对数尺度)。</li>
+      <li><b>维护 Maintenance</b>:Release 频率与最近一次发布时间。</li>
+      <li><b>响应 Responsiveness</b>:Issue 开放比例与处理速度。</li>
+    </ul>
+  </div>
+</template>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
